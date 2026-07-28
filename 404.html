@@ -5,7 +5,7 @@
 <title>Redirecting…</title>
 <script>
 (function () {
-  var m = location.pathname.match(/^\/archives\/(\d+)\/?$/);
+  var m = location.pathname.match(/\/archives\/(\d+)\/?$/);
   if (m) {
     location.replace("https://wuxinan.wordpress.com/?p=" + m[1]);
     return;
