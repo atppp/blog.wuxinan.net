@@ -3,8 +3,15 @@
 <head>
 <meta charset="utf-8">
 <title>Redirecting…</title>
-<link rel="canonical" href="https://wuxinan.wordpress.com/">
-<meta http-equiv="refresh" content="0; url=https://wuxinan.wordpress.com/">
+<script>
+(function () {
+  var p = new URLSearchParams(location.search).get("p");
+  var target = (p && /^\d+$/.test(p))
+    ? "https://wuxinan.wordpress.com/?p=" + p
+    : "https://wuxinan.wordpress.com/";
+  location.replace(target);
+})();
+</script>
 </head>
 <body>
 <p>Redirecting to <a href="https://wuxinan.wordpress.com/">https://wuxinan.wordpress.com/</a>…</p>
