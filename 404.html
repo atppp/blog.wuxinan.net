@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Redirecting…</title>
+<script>
+(function () {
+  var m = location.pathname.match(/^\/archives\/(\d+)\/?$/);
+  if (m) {
+    location.replace("https://wuxinan.wordpress.com/?p=" + m[1]);
+    return;
+  }
+  document.title = "Not found";
+})();
+</script>
+</head>
+<body>
+<p>If you are not redirected, open <a href="https://wuxinan.wordpress.com/">wuxinan.wordpress.com</a>.</p>
+</body>
+</html>
