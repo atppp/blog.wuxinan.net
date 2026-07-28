@@ -5,9 +5,24 @@
 <title>Redirecting…</title>
 <script>
 (function () {
-  var m = location.pathname.match(/\/archives\/(\d+)\/?$/);
+  var path = location.pathname;
+  var m = path.match(/\/archives\/(\d+)\/?$/);
   if (m) {
     location.replace("https://wuxinan.wordpress.com/?p=" + m[1]);
+    return;
+  }
+  m = path.match(/\/archives\/tag\/([^\/]+)\/?$/);
+  if (m) {
+    location.replace("https://wuxinan.wordpress.com/tag/" + decodeURIComponent(m[1]) + "/");
+    return;
+  }
+  m = path.match(/\/archives\/category\/([^\/]+)\/?$/);
+  if (m) {
+    location.replace("https://wuxinan.wordpress.com/category/" + decodeURIComponent(m[1]) + "/");
+    return;
+  }
+  if (/\/about\/?$/.test(path)) {
+    location.replace("https://wuxinan.wordpress.com/about/");
     return;
   }
   document.title = "Not found";
